@@ -181,7 +181,7 @@ class CT(object):
     def select_points_near(self, point, nearby_range=10):
         self.select_points(self.all_points.get_points_in_range(point, nearby_range))
 
-    def select_weighted_center(self, point, radius=10, iterations=1):
+    def select_weighted_center(self, point, radius=4, iterations=1):
         self.select_points_near(point, radius)
         for _ in range(iterations):
             centered_point = self.selected_points.get_center()
