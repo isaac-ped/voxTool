@@ -1019,9 +1019,9 @@ class AxisView(CloudView):
             for name in name_pair:
                 location  = center.copy()
                 if name is name_pair[0]:
-                    location[i] += max_dist*1.25 * np.sign(axis[i])
+                    location[i] += max_dist * 1.25
                 else:
-                    location[i] -= max_dist * 1.25 * np.sign(axis[i])
+                    location[i] -= max_dist * 1.25
                 color = [0.,0.,0.]
                 color[i] = 1.
                 letter = mlab.text3d(location[0], location[1], location[2], name, color=tuple(color), scale=self.scale,
