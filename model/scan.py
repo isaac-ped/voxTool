@@ -527,6 +527,7 @@ class CT(object):
         super(CT, self).__init__()
         self.config = config
         self.threshold = self.DEFAULT_THRESHOLD
+        self._skull_points = PointCloud([])
         self._points = PointCloud([])
         self._leads = OrderedDict()
         self._selection = PointMask("_selected", self._points)
@@ -545,10 +546,10 @@ class CT(object):
     def _load_scan(self, img_file):
         self.filename = img_file
         log.debug("Loading {}".format(img_file))
-        img = nib.load(self.filename)
-        self.data = img.get_data().squeeze()
-        self.brainmask = np.zeros(img.get_data().shape, bool)
-        self.affine = img.affine[:3,:]
+        self.img = nib.load(self.filename)
+        self.data = self.img.get_data().squeeze()
+        self.brainmask = np.zeros(self.img.get_data().shape, bool)
+        self.affine = self.img.affine[:3,:]
 
     def add_mask(self, filename):
         mask = nib.load(filename).get_data()
@@ -718,8 +719,30 @@ class CT(object):
         mask = self.data >= threshold_value
         logging.debug("Getting super-threshold indices")
         indices = np.array(mask.nonzero()).T
+        
+        max_points = 100000
+        if len(indices) > max_points:
+            step_size = len(indices) / max_points
+            orig_n_indices = len(indices)
+            indices = indices[::step_size]
+            log.debug("Downsampled the number of points from {} to {}".format(orig_n_indices, len(indices)))
+        
         self._points.set_coordinates(indices)
         self._selection = PointMask("_selection", self._points)
+        
+        threshold_value = np.percentile(self.data, 99)
+        logging.debug("Thresholding at an intensity of {}".format(threshold_value))
+        mask = self.data >= threshold_value
+        logging.debug("Getting super-threshold indices")
+        indices = np.array(mask.nonzero()).T
+        
+        max_points = 50000
+        if len(indices) > max_points:
+            step_size = len(indices) / max_points
+            orig_n_indices = len(indices)
+            indices = indices[::step_size]
+            log.debug("Downsampled the number of points from {} to {}".format(orig_n_indices, len(indices)))
+        self._skull_points.set_coordinates(indices)
 
     def select_points(self, point_mask):
         self._selection.clear()
@@ -752,6 +775,12 @@ class CT(object):
     def set_selected_lead(self, lead_label):
         self.selected_lead_label = lead_label
 
+
+    def skull_xyz(self):
+        c = self._skull_points.get_coordinates()
+        label = ['_skull'] * len(c[:, 0])
+        return label, c[:, 0], c[:, 1], c[:, 2],
+
     def all_xyz(self):
         c = self._points.get_coordinates()
         label = ['_ct'] * len(c[:, 0])
@@ -771,10 +800,20 @@ class CT(object):
     def xyz(self, label):
         if label == '_ct':
             return self.all_xyz()
+        if label == "_skull":
+            return self.skull_xyz()
         if label == '_leads':
             return self.lead_xyz()
         if label == '_selected':
             return self.selection_xyz()
+        
+    @property
+    def axis_scale(self):
+        axis_affine = self.affine.T[:3]
+        axis_scale = axis_affine[axis_affine!=0]
+        if axis_scale.shape != (3,):
+            raise PylocModelException("Affine transformation does not contain 3 non-zero elements")
+        return axis_scale
 
     def clear_selection(self):
         self._selection.clear()

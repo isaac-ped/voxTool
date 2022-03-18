@@ -42,6 +42,14 @@ class SliceViewWidget(QtGui.QWidget):
         for slice_view in self.views:
             slice_view.coordinate = coordinate
 
+    def set_scale(self, scale):
+        for slice_view in self.views:
+            mask = np.ones(3, dtype=bool)
+            mask[slice_view.axis] = False
+            slice_view.set_scale(scale[mask])
+            
+            
+
     def set_image(self, image):
         for slice_view in self.views:
             slice_view.set_image(image)
@@ -69,6 +77,7 @@ class SliceView(FigureCanvas):
         self.radius = None
         self._plot = None
         self.subplot = subplot
+        self.scale = np.array([1,1])
 
         FigureCanvas.__init__(self, self.fig)
         self.setParent(parent)
@@ -78,6 +87,8 @@ class SliceView(FigureCanvas):
                                    QtGui.QSizePolicy.Expanding)
         FigureCanvas.updateGeometry(self)
 
+    def set_scale(self, scale):
+        self.scale = scale
 
     def set_image(self, image):
         self.image = image
@@ -91,7 +102,7 @@ class SliceView(FigureCanvas):
         plot_plane = [slice(0, self.image.shape[i]) for i in range(3)]
         plot_plane[self.axis] = int(self.coordinate[self.axis])
 
-        plotted_image = self.image[plot_plane]
+        plotted_image = self.image[tuple(plot_plane)]
         plotted_image = np.flipud(plotted_image.T)
         extent = [0, plotted_image.shape[0], 0, plotted_image.shape[1], 0, 0]
         self.axes.cla()
@@ -104,15 +115,16 @@ class SliceView(FigureCanvas):
         plt.axis('off')
         circl_coords = list(self.coordinate)
         del circl_coords[self.axis]
-        radius = 10 if self.axis != 3 else 40
 
         if self.axis != 2:
             circl_coords[0], circl_coords[1] = circl_coords[0], plotted_image.shape[0] - circl_coords[1]
         else:
             circl_coords[1] = plotted_image.shape[0] - circl_coords[1]
 
-        self.circ = plt.Circle(circl_coords, radius=radius, edgecolor='r', fill=False)
+        from matplotlib.patches import Ellipse
+        self.circ = Ellipse(circl_coords, width=10./self.scale[0], height=10./self.scale[1], edgecolor='r', fill=False)
         self.axes.add_patch(self.circ)
+        self.axes.set_aspect(np.abs(self.scale[1] / self.scale[0]))
         #plt.tight_layout()
         #self._plot = plt.imshow(self.image[plot_plane], colormap='bone')#, aspect='auto')
         #src = self._plot.mlab_source

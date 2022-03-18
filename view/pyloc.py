@@ -30,6 +30,7 @@ def add_labeled_widget(layout, label, *widgets):
     for widget in widgets:
         sub_layout.addWidget(widget)
     layout.addLayout(sub_layout)
+    return sub_layout
 
 
 
@@ -125,6 +126,10 @@ class PylocControl(object):
         self.view.toggle_RAS()
 
 
+    def toggle_skull(self,state):
+        self.view.toggle_skull()
+
+
 
 
     def prompt_for_ct(self):
@@ -132,7 +137,7 @@ class PylocControl(object):
         Callback for "Load Scan" button. See :load_ct:
         :return:
         """
-        file_ = QtGui.QFileDialog().getOpenFileName(None, 'Select Scan', '.', '(*.img; *.nii.gz)')
+        file_ = QtGui.QFileDialog().getOpenFileName(None, 'Select Scan', '.', '(*.img;*.nii.gz)')
         if file_:
             self.load_ct(filename=file_)
             self.view.task_bar.define_leads_button.setEnabled(True)
@@ -148,14 +153,20 @@ class PylocControl(object):
         """
         self.ct = CT(self.config)
         self.ct.load(filename,self.config['ct_threshold'])
-        self.view.slice_view.set_label(filename)
+        self.view.slice_view.set_label(filename.split("/")[-1])
         self.view.contact_panel.update_contacts()
         self.view.contact_panel.setEnabled(True)
-        self.view.add_cloud(self.ct, '_ct', callback=self.select_coordinate)
+        self.view.add_cloud(self.ct, '_skull')
+        self.view.add_cloud(self.ct, '_ct', callback=self.picker_callback)
         self.view.add_cloud(self.ct, '_leads')
         self.view.add_cloud(self.ct, '_selected')
         self.view.add_RAS(self.ct)
         self.view.set_slice_scan(self.ct.data)
+        self.view.set_slice_scale(self.ct.axis_scale)
+    
+        self.view.task_bar.define_leads_button.setEnabled(True)
+        self.view.task_bar.save_button.setEnabled(True)
+        self.view.task_bar.load_coord_button.setEnabled(True)
 
     def exec_(self):
         self.app.exec_()
@@ -190,9 +201,12 @@ class PylocControl(object):
     def load_coordinates(self):
         file = QtGui.QFileDialog().getOpenFileName(None, 'Select voxel_coordinates.json', '.', '(*.json)')
         if file:
-            self.ct.from_json(file)
-            self.view.update_cloud('_leads')
-            self.view.contact_panel.update_contacts()
+            self.load_coordinate_file(file)
+
+    def load_coordinate_file(self, file):
+        self.ct.from_json(file)
+        self.view.update_cloud('_leads')
+        self.view.contact_panel.update_contacts()
 
     def define_leads(self):
         """
@@ -205,6 +219,9 @@ class PylocControl(object):
         self.lead_window.setCentralWidget(lead_widget)
         self.lead_window.show()
         self.lead_window.resize(200, lead_widget.height())
+
+    def picker_callback(self, coordinate):
+        return self.select_coordinate(coordinate / self.ct.axis_scale)
 
     def select_coordinate(self, coordinate, do_center=True, allow_seed=True):
         """
@@ -333,19 +350,22 @@ class PylocWidget(QtGui.QWidget):
         self.controller = controller
         self.cloud_widget = CloudWidget(self, config)
         self.task_bar = TaskBarLayout()
-        self.slice_view = SliceViewWidget(self)
         self.contact_panel = ContactPanelWidget(controller, config, self)
         self.contact_panel.setEnabled(False)
-        self.threshold_panel = ThresholdWidget(controller=controller, config=config, parent=self)
+        threshold_and_slice = QtGui.QWidget(self)
+        thresh_layout = QtGui.QVBoxLayout(threshold_and_slice)
+        self.slice_view = SliceViewWidget()
+        self.threshold_panel = ThresholdWidget(controller=controller, config=config)
+        thresh_layout.addWidget(self.threshold_panel)
+        thresh_layout.addWidget(self.slice_view)
 
         layout = QtGui.QVBoxLayout(self)
         splitter = QtGui.QSplitter()
         splitter.addWidget(self.contact_panel)
         splitter.addWidget(self.cloud_widget)
-        splitter.addWidget(self.slice_view)
+        splitter.addWidget(threshold_and_slice)
         splitter.setSizes([50,400,200])
 
-        layout.addWidget(self.threshold_panel)
         layout.addWidget(splitter)
         layout.addLayout(self.task_bar)
 
@@ -377,11 +397,17 @@ class PylocWidget(QtGui.QWidget):
     def toggle_RAS(self):
         self.cloud_widget.toggle_RAS()
 
+    def toggle_skull(self):
+        self.cloud_widget.toggle_skull()
+        
     def remove_cloud(self, label):
         self.cloud_widget.remove_cloud(label)
 
     def set_slice_scan(self, scan):
         self.slice_view.set_image(scan)
+
+    def set_slice_scale(self, scale):
+        self.slice_view.set_scale(scale)
 
     def update_ras(self, coordinate):
         self.contact_panel.display_coordinate(coordinate)
@@ -433,8 +459,10 @@ class ContactPanelWidget(QtGui.QWidget):
         add_labeled_widget(lead_layout,
                                 "Label :", self.label_dropdown)
         self.contact_name = QtGui.QLineEdit()
+        self.contact_name.setMaximumWidth(100)
         lead_layout.addWidget(self.contact_name)
-
+        lead_layout.addStretch()
+        
         loc_layout = QtGui.QHBoxLayout()
         layout.addLayout(loc_layout)
 
@@ -468,6 +496,9 @@ class ContactPanelWidget(QtGui.QWidget):
         self.axes_checkbox = QtGui.QCheckBox("Show RAS Tags")
         self.axes_checkbox.setChecked(True)
         vox_layout.addWidget(self.axes_checkbox)
+        self.skull_checkbox = QtGui.QCheckBox("Show Skull")
+        self.skull_checkbox.setChecked(True)
+        layout.addWidget(self.skull_checkbox)
 
         self.submit_button = QtGui.QPushButton("Submit")
 
@@ -510,6 +541,7 @@ class ContactPanelWidget(QtGui.QWidget):
         self.seed_button.clicked.connect(self.controller.toggle_seeding)
         self.micro_button.clicked.connect(self.controller.add_micro_contacts)
         self.axes_checkbox.stateChanged.connect(self.controller.toggle_RAS_axes)
+        self.skull_checkbox.stateChanged.connect(self.controller.toggle_skull)
 
     LEAD_LOC_REGEX = r'\((\d+\.?\d*),\s?(\d+\.?\d*),\s?(\d+\.?\d*)\)'
 
@@ -560,9 +592,10 @@ class ContactPanelWidget(QtGui.QWidget):
 
     def lead_changed(self):
         lead_txt = self.label_dropdown.currentText()
-        self.controller.set_selected_lead(lead_txt.split()[0])
-        self.lead_group.setText("0")
-        self.lead_location_changed()
+        if lead_txt:
+            self.controller.set_selected_lead(lead_txt.split()[0])
+            self.lead_group.setText("0")
+            self.lead_location_changed()
 
     def contact_changed(self):
         self.controller.set_contact_label(self.contact_name.text())
@@ -779,22 +812,22 @@ class ThresholdWidget(QtGui.QWidget):
         self.set_threshold_button = QtGui.QPushButton("Update")
         self.set_threshold_button.clicked.connect(self.update_pressed)
         self.threshold_selector = QtGui.QDoubleSpinBox()
-        self.threshold_selector.setSingleStep(0.5)
+        self.threshold_selector.setSingleStep(0.01)
         self.threshold_selector.setValue(self.config['ct_threshold'])
         self.threshold_selector.valueChanged.connect(self.update_threshold_value)
         self.threshold_selector.setKeyboardTracking(True)
 
         layout = QtGui.QVBoxLayout(self)
         layout.setContentsMargins(1,1,1,1)
-        add_labeled_widget(layout,'CT Threshold',self.threshold_selector,self.set_threshold_button)
+        box = add_labeled_widget(layout,'CT Threshold',self.threshold_selector,self.set_threshold_button)
+        box.insertStretch(0)
 
         self.setSizePolicy(QtGui.QSizePolicy.Preferred,QtGui.QSizePolicy.Maximum)
 
     def update_pressed(self):
         if self.controller.ct:
             self.controller.ct.set_threshold(self.config['ct_threshold'])
-            for label in ['_ct','_leads','_selection']:
-                self.controller.view.update_clouds()
+            self.controller.view.update_clouds()
 
     def update_threshold_value(self,value):
         self.config['ct_threshold']= value
@@ -856,7 +889,15 @@ class CloudWidget(QtGui.QWidget):
             RAS.hide()
         else:
             RAS.show()
-
+            
+    def toggle_skull(self):
+        skull = self.viewer.clouds["_skull"]
+        if skull._plotted:
+            skull.unplot()
+        else:
+            skull.plot()
+            
+            
     def plot_cloud(self,label):
         self.viewer.plot_cloud(label)
 
@@ -944,6 +985,8 @@ class CloudView(object):
             return self.config['colormaps']['ct']
         elif label == '_selected':
             return self.config['colormaps']['selected']
+        elif label == "_skull":
+            return self.config['colormaps']['skull']
         else:
             return self.config['colormaps']['default']
 
@@ -955,6 +998,8 @@ class CloudView(object):
         self._callback = callback if callback else lambda *_: None
         self._plot = None
         self._glyph_points = None
+        self._plotted = False
+        self._opacity = .5 if self.label != "_skull" else .05
 
     def callback(self, picker):
         return self._callback(np.array(picker.pick_position))
@@ -962,11 +1007,11 @@ class CloudView(object):
     def get_colors(self, labels, x, y, z):
         colors = np.ones(len(x))
         if len(labels) == 0:
-            return []
+            return np.array([])
         min_y = float(min(y))
         max_y = float(max(y))
         for i, label in enumerate(labels):
-            if label == '_ct':
+            if label == '_ct' or label == "_skull":
                 colors[i] = ((y[i] - min_y) / max_y) * \
                             (self.config['ct_max_color'] - self.config['ct_min_color']) \
                             + self.config['ct_min_color']
@@ -984,16 +1029,23 @@ class CloudView(object):
 
     def plot(self):
         labels, x, y, z = self.ct.xyz(self.label)
-        self._plot = mlab.points3d(x, y, z,  # self.get_colors(labels, x, y, z),
+        self._plot = mlab.points3d(x, y, z,
                                    mode='cube', resolution=3,
                                    colormap=self.colormap,
-                                   opacity=.5,
+                                   opacity=self._opacity,
                                    vmax=1, vmin=0,
                                    scale_mode='none', scale_factor=1)
-        self._plot.mlab_source.set(scalars=self.get_colors(labels, x, y, z))
+        if labels:
+            self._colors = self.get_colors(labels, x, y, z)
+            self._plot.mlab_source.set(scalars=self._colors)
+        if self.label != "_ct":
+            self._plot.actor.actor.pickable = False
+        self._plot.actor.actor.scale = self.ct.axis_scale
+        self._plotted = True
 
     def unplot(self):
         self._plot.mlab_source.reset(x=[], y=[], z=[], scalars=[])
+        self._plotted = False
 
     def update(self):
         labels, x, y, z = self.ct.xyz(self.label)
@@ -1006,27 +1058,30 @@ class AxisView(CloudView):
 
     def __init__(self,ct,config,callback=None):
         super(AxisView, self).__init__(ct,config=config,label='Axis',callback=callback)
-        self.scale = 35
+        self.scale = 10
         self._plots = []
 
     def plot(self):
         coords = self.ct._points.coordinates
         center = np.array([0.5*(coords[:,i].max() + coords[:,i].min()) for i in range(3)])
-        u,v,w,t = self.ct.affine.T
-        max_dist = np.abs(coords-center).max()
-
-        for i,(axis,name_pair) in enumerate(zip((u,v,w),(('R','L'),('A','P'),('S','I')))):
+        # A 3x1 array of the maximum offset from center for each axis
+        max_dist = np.abs(coords-center).max(axis=0)
+        label_dist = max_dist * 1.25 * np.abs(self.ct.axis_scale)
+        _, axis_order = self.ct.affine.T[:3].nonzero()
+        for i,name_pair in zip(axis_order, [('R','L'),('A','P'),('S','I')]):
             for name in name_pair:
-                location  = center.copy()
+                # The affine transform may require axis orientations to be flipped
+                location = center.copy() * self.ct.axis_scale
                 if name is name_pair[0]:
-                    location[i] += max_dist * 1.25
+                    location[i] += label_dist[i]
                 else:
-                    location[i] -= max_dist * 1.25
+                    location[i] -= label_dist[i]
                 color = [0.,0.,0.]
                 color[i] = 1.
                 letter = mlab.text3d(location[0], location[1], location[2], name, color=tuple(color), scale=self.scale,
                                      opacity=0.75,
                                      )
+                letter.actor.actor.pickable = False
                 self._plots.append(letter)
 
     def contains(self, picker):
@@ -1034,6 +1089,10 @@ class AxisView(CloudView):
 
     def update(self):
         return
+
+    @property
+    def visible(self):
+        return any(p.visible for p in self._plots)
 
     def hide(self):
         for plot in self._plots:

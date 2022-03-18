@@ -104,6 +104,7 @@ colormaps:
   ct: 'bone'
   selected: 'spring'
   default: 'spectral'
+  skull: 'summer'
 
 selection_iterations: 2
 
