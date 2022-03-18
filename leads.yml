@@ -1,0 +1,16 @@
+- label: A
+  x: 1
+  y: 8
+  type: 'S'
+- label: B
+  x: 1
+  y: 8
+  type: 'S'
+- label: C
+  x: 1
+  y: 8
+  type: 'S'
+- label: D
+  x: 1
+  y: 8
+  type: 'S'
